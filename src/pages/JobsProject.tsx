@@ -5,7 +5,7 @@
 // Jobs & Project Management
 // ==================================================
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 
 import {
@@ -54,12 +54,11 @@ import {
   resetWorkspaceTasks,
 } from '../services/taskStore';
 
-
 // ==================================================
 // 01. CONFIGURATION
 // ==================================================
 
-const TASK_STATUSES: TaskStatus[] = [
+const STATUSES: TaskStatus[] = [
   'Pending',
   'In Progress',
   'In Review',
@@ -94,13 +93,7 @@ type TaskDraft = Omit<Task, 'id'>;
 
 type ViewMode = 'list' | 'kanban';
 
-
-// ==================================================
-// 02. DEFAULT FORM DATA
-// ==================================================
-
-function createDefaultDraft(): TaskDraft {
-
+function createDraft(): TaskDraft {
   return {
     title: '',
     projectId: DEMO_PROJECTS[0]?.id ?? '',
@@ -110,75 +103,41 @@ function createDefaultDraft(): TaskDraft {
     status: 'Pending',
     progress: 0,
   };
-
 }
 
-
-// ==================================================
-// 03. PROGRESS NORMALIZATION
-// ==================================================
-
-function normalizeDraft(
-  draft: TaskDraft
-): TaskDraft {
-
+function normalizeDraft(draft: TaskDraft): TaskDraft {
   let progress = Math.min(
     100,
     Math.max(0, Math.round(draft.progress))
   );
 
-  if (draft.status === 'Pending') {
-    progress = 0;
-  }
-
   if (draft.status === 'Completed') {
     progress = 100;
-  }
-
-  if (
-    draft.status === 'In Progress' ||
-    draft.status === 'In Review'
-  ) {
+  } else if (draft.status === 'Pending') {
+    progress = 0;
+  } else if (draft.status !== 'Cancelled') {
     progress = Math.min(99, progress);
   }
 
-  return {
-    ...draft,
-    progress,
-  };
-
+  return { ...draft, progress };
 }
 
-
 // ==================================================
-// 04. REUSABLE PROGRESS BAR
+// 02. REUSABLE COMPONENTS
 // ==================================================
 
-function ProgressBar({
-  value,
-}: {
-  value: number;
-}) {
-
-  const progress = Math.min(
-    100,
-    Math.max(0, value)
-  );
+function ProgressBar({ value }: { value: number }) {
+  const progress = Math.min(100, Math.max(0, value));
 
   return (
-
     <div>
-
       <div className="progress-label">
-
         <span className="text-workspace-muted">
           Progress
         </span>
-
-        <span className="numeric-value font-semibold">
+        <span className="font-semibold numeric-value">
           {progress}%
         </span>
-
       </div>
 
       <div
@@ -189,118 +148,92 @@ function ProgressBar({
         aria-valuemax={100}
         aria-valuenow={progress}
       >
-
         <div
-          className={`
-            progress-fill
-            ${progress === 100 ? 'completed' : ''}
-          `}
-          style={{
-            width: `${progress}%`,
-          }}
+          className={
+            `progress-fill ${
+              progress === 100 ? 'completed' : ''
+            }`
+          }
+          style={{ width: `${progress}%` }}
         />
-
       </div>
-
     </div>
-
   );
-
 }
 
-
-// ==================================================
-// 05. STATUS COMPONENT
-// ==================================================
-
-function StatusBadge({
-  task,
-}: {
-  task: Task;
-}) {
-
+function StatusBadge({ task }: { task: Task }) {
   const status = getDisplayStatus(task);
 
   return (
-
-    <span
-      className={`
-        status-badge
-        ${getStatusClass(status)}
-      `}
-    >
+    <span className={
+      `status-badge ${getStatusClass(status)}`
+    }>
       {status}
     </span>
-
   );
-
 }
-
-
-// ==================================================
-// 06. PRIORITY COMPONENT
-// ==================================================
 
 function PriorityBadge({
   priority,
 }: {
   priority: TaskPriority;
 }) {
-
   return (
-
-    <span
-      className={`
-        priority-badge
-        priority-${priority.toLowerCase()}
-      `}
-    >
+    <span className={
+      `priority-badge priority-${priority.toLowerCase()}`
+    }>
       {priority}
     </span>
-
   );
-
 }
 
-
 // ==================================================
-// 07. MAIN JOBS & PROJECT PAGE
+// 03. MAIN APPLICATION
 // ==================================================
 
 export default function JobsProject() {
 
-  // Shared task storage
   const tasks = useWorkspaceTasks(DEMO_TASKS);
 
-  // Search and filter states
   const [search, setSearch] = useState('');
   const [picFilter, setPicFilter] = useState('all');
   const [projectFilter, setProjectFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
 
-  // View configuration
   const [view, setView] = useState<ViewMode>('list');
 
-  // Task form configuration
   const [draft, setDraft] = useState<TaskDraft | null>(null);
 
   const [editingId, setEditingId] =
     useState<string | null>(null);
 
+  const formRef = useRef<HTMLElement>(null);
+  const formOpen = draft !== null;
+
+  useEffect(() => {
+    if (formOpen) {
+      formRef.current?.scrollIntoView({
+        behavior: 'auto',
+        block: 'start',
+      });
+
+      formRef.current
+        ?.querySelector('input')
+        ?.focus({ preventScroll: true });
+    }
+  }, [formOpen]);
 
   // ==================================================
-  // 08. TASK STATISTICS
+  // 04. MANAGEMENT STATISTICS
   // ==================================================
 
   const validTasks = tasks.filter(
-    (task) => task.status !== 'Cancelled'
+    task => task.status !== 'Cancelled'
   );
 
-  const totalTasks = validTasks.length;
-
   const completedTasks = validTasks.filter(
-    (task) => task.status === 'Completed'
+    task => task.status === 'Completed'
   ).length;
 
   const overdueTasks = validTasks.filter(
@@ -308,25 +241,49 @@ export default function JobsProject() {
   ).length;
 
   const activeTasks = validTasks.filter(
-    (task) =>
+    task =>
       task.status !== 'Completed' &&
       !isOverdue(task)
   ).length;
 
+  const statistics = [
+    {
+      label: 'Total Tasks',
+      value: validTasks.length,
+      icon: ClipboardList,
+      color: '#D1D5DB',
+    },
+    {
+      label: 'Completed',
+      value: completedTasks,
+      icon: CheckCircle2,
+      color: '#34D399',
+    },
+    {
+      label: 'Active Tasks',
+      value: activeTasks,
+      icon: Clock3,
+      color: '#60A5FA',
+    },
+    {
+      label: 'Overdue',
+      value: overdueTasks,
+      icon: AlertCircle,
+      color: '#F87171',
+    },
+  ];
 
   // ==================================================
-  // 09. SEARCH AND FILTER
+  // 05. SEARCH AND FILTER
   // ==================================================
 
   const filteredTasks = tasks
-    .filter((task) => {
-
-      const keyword = search.trim().toLowerCase();
+    .filter(task => {
 
       const member = getMember(task.picId);
 
       const project = DEMO_PROJECTS.find(
-        (item) => item.id === task.projectId
+        item => item.id === task.projectId
       );
 
       const searchable = [
@@ -337,31 +294,30 @@ export default function JobsProject() {
         project?.name ?? '',
       ].join(' ').toLowerCase();
 
-      const matchesSearch =
-        searchable.includes(keyword);
-
-      const matchesPic =
-        picFilter === 'all' ||
-        task.picId === picFilter;
-
-      const matchesProject =
-        projectFilter === 'all' ||
-        task.projectId === projectFilter;
-
-      const matchesStatus =
-        statusFilter === 'all' ||
-        getDisplayStatus(task) === statusFilter;
-
-      const matchesPriority =
-        priorityFilter === 'all' ||
-        task.priority === priorityFilter;
-
       return (
-        matchesSearch &&
-        matchesPic &&
-        matchesProject &&
-        matchesStatus &&
-        matchesPriority
+        searchable.includes(
+          search.trim().toLowerCase()
+        ) &&
+
+        (
+          picFilter === 'all' ||
+          task.picId === picFilter
+        ) &&
+
+        (
+          projectFilter === 'all' ||
+          task.projectId === projectFilter
+        ) &&
+
+        (
+          statusFilter === 'all' ||
+          getDisplayStatus(task) === statusFilter
+        ) &&
+
+        (
+          priorityFilter === 'all' ||
+          task.priority === priorityFilter
+        )
       );
 
     })
@@ -369,25 +325,23 @@ export default function JobsProject() {
       (a, b) =>
         Number(isOverdue(b)) -
         Number(isOverdue(a)) ||
+
         PRIORITY_ORDER[a.priority] -
         PRIORITY_ORDER[b.priority] ||
+
         a.deadline.localeCompare(b.deadline)
     );
 
-
   // ==================================================
-  // 10. FORM ACTIONS
+  // 06. CREATE AND EDIT TASK
   // ==================================================
 
   function openCreateTask() {
-
     setEditingId(null);
-    setDraft(createDefaultDraft());
-
+    setDraft(createDraft());
   }
 
   function openEditTask(task: Task) {
-
     setEditingId(task.id);
 
     setDraft({
@@ -399,38 +353,26 @@ export default function JobsProject() {
       status: task.status,
       progress: task.progress,
     });
-
   }
 
   function closeForm() {
-
     setDraft(null);
     setEditingId(null);
-
   }
 
-  function updateDraft(
-    changes: Partial<TaskDraft>
-  ) {
-
-    setDraft((previous) => {
-
-      if (!previous) {
-        return null;
-      }
-
-      return normalizeDraft({
-        ...previous,
-        ...changes,
-      });
-
-    });
-
+  function updateDraft(changes: Partial<TaskDraft>) {
+    setDraft(previous =>
+      previous
+        ? normalizeDraft({
+            ...previous,
+            ...changes,
+          })
+        : null
+    );
   }
-
 
   // ==================================================
-  // 11. SAVE TASK
+  // 07. SAVE TASK
   // ==================================================
 
   function handleSave(
@@ -439,60 +381,41 @@ export default function JobsProject() {
 
     event.preventDefault();
 
-    if (!draft) {
-      return;
-    }
+    if (!draft) return;
 
     const normalized = normalizeDraft(draft);
 
     if (!normalized.title.trim()) {
-
       toast.error('Nama pekerjaan wajib diisi.');
       return;
-
     }
 
     if (!normalized.deadline) {
-
       toast.error('Deadline wajib diisi.');
       return;
-
     }
 
-    if (
-      !DEMO_PROJECTS.some(
-        (item) => item.id === normalized.projectId
-      )
-    ) {
-
-      toast.error('Pilih proyek yang valid.');
+    if (!TEAM_MEMBERS.some(
+      member => member.id === normalized.picId
+    )) {
+      toast.error('PIC tidak valid.');
       return;
-
     }
 
-    if (
-      !TEAM_MEMBERS.some(
-        (item) => item.id === normalized.picId
-      )
-    ) {
-
-      toast.error('Pilih PIC yang valid.');
+    if (!DEMO_PROJECTS.some(
+      project => project.id === normalized.projectId
+    )) {
+      toast.error('Project tidak valid.');
       return;
-
     }
 
     if (
       editingId &&
-      !tasks.some((task) => task.id === editingId)
+      !tasks.some(task => task.id === editingId)
     ) {
-
-      toast.error(
-        'Pekerjaan sudah tidak tersedia.'
-      );
-
+      toast.error('Pekerjaan sudah tidak tersedia.');
       closeForm();
       return;
-
     }
 
     try {
@@ -500,17 +423,13 @@ export default function JobsProject() {
       const task: Task = {
         ...normalized,
         title: normalized.title.trim(),
-        id: editingId ??
-          `JFX-${crypto.randomUUID()}`,
+        id: editingId ?? `JFX-${crypto.randomUUID()}`,
       };
 
       const updatedTasks = editingId
 
-        ? tasks.map(
-            (item) =>
-              item.id === editingId
-                ? task
-                : item
+        ? tasks.map(item =>
+            item.id === editingId ? task : item
           )
 
         : [...tasks, task];
@@ -520,129 +439,93 @@ export default function JobsProject() {
       toast.success(
         editingId
           ? 'Pekerjaan berhasil diperbarui.'
-          : 'Pekerjaan baru berhasil dibuat.'
+          : 'Pekerjaan berhasil dibuat.'
       );
 
       closeForm();
 
     } catch {
-
-      toast.error(
-        'Gagal menyimpan. Periksa penyimpanan browser.'
-      );
-
+      toast.error('Gagal menyimpan pekerjaan.');
     }
-
   }
 
-
   // ==================================================
-  // 12. DELETE TASK
+  // 08. DELETE TASK
   // ==================================================
 
   function handleDelete(task: Task) {
 
-    const confirmed = window.confirm(
+    if (!window.confirm(
       `Hapus pekerjaan "${task.title}"? ` +
       'Tindakan ini tidak dapat dibatalkan.'
-    );
-
-    if (!confirmed) {
+    )) {
       return;
     }
 
     try {
 
       saveWorkspaceTasks(
-        tasks.filter(
-          (item) => item.id !== task.id
-        )
+        tasks.filter(item => item.id !== task.id)
       );
 
       if (editingId === task.id) {
         closeForm();
       }
 
-      toast.success(
-        'Pekerjaan berhasil dihapus.'
-      );
+      toast.success('Pekerjaan berhasil dihapus.');
 
     } catch {
-
-      toast.error(
-        'Pekerjaan gagal dihapus.'
-      );
-
+      toast.error('Gagal menghapus pekerjaan.');
     }
-
   }
 
-
   // ==================================================
-  // 13. FILTER & RESET ACTIONS
+  // 09. RESET FILTER AND DEMO DATA
   // ==================================================
 
   function clearFilters() {
-
     setSearch('');
     setPicFilter('all');
     setProjectFilter('all');
     setStatusFilter('all');
     setPriorityFilter('all');
-
   }
 
-  function handleResetDemo() {
+  function handleReset() {
 
-    const confirmed = window.confirm(
-      'Seluruh perubahan tugas lokal akan dihapus ' +
-      'dan data simulasi awal akan dikembalikan. ' +
-      'Lanjutkan?'
-    );
-
-    if (!confirmed) {
+    if (!window.confirm(
+      'Seluruh perubahan lokal akan dihapus. ' +
+      'Kembalikan data simulasi awal?'
+    )) {
       return;
     }
 
     try {
 
       resetWorkspaceTasks();
-
       closeForm();
       clearFilters();
 
-      toast.success(
-        'Data simulasi berhasil dikembalikan.'
-      );
+      toast.success('Demo data berhasil dikembalikan.');
 
     } catch {
-
-      toast.error(
-        'Gagal mengembalikan data simulasi.'
-      );
-
+      toast.error('Gagal mengembalikan data.');
     }
-
   }
 
-
   // ==================================================
-  // 14. PAGE RENDER
+  // 10. PAGE INTERFACE
   // ==================================================
 
   return (
 
-    <div className="
-      workspace-container
-      section-stack
-    ">
+    <div className="workspace-container section-stack">
 
       {/* PAGE HEADER */}
 
       <div className="page-header">
 
         <div>
-
           <p className="eyebrow mb-2">
             Operational Management
           </p>
@@ -652,74 +535,39 @@ export default function JobsProject() {
           </h2>
 
           <p className="page-description">
-            Kelola pekerjaan, tanggung jawab PIC,
-            deadline, dan progres proyek JourneyFX.
+            Kelola pekerjaan, proyek, PIC,
+            deadline dan progres management JourneyFX.
           </p>
-
         </div>
 
-        <div className="page-actions">
-
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={openCreateTask}
-            disabled={draft !== null}
-          >
-            <Plus size={18} />
-            New Task
-          </button>
-
-        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={openCreateTask}
+          disabled={formOpen}
+        >
+          <Plus size={18} />
+          New Task
+        </button>
 
       </div>
 
-
-      {/* TASK STATISTICS */}
+      {/* STATISTICS */}
 
       <section className="dashboard-grid">
 
-        {[
-          {
-            label: 'Total Tasks',
-            value: totalTasks,
-            icon: ClipboardList,
-            color: '#D1D5DB',
-          },
-          {
-            label: 'Completed',
-            value: completedTasks,
-            icon: CheckCircle2,
-            color: '#34D399',
-          },
-          {
-            label: 'Active Tasks',
-            value: activeTasks,
-            icon: Clock3,
-            color: '#60A5FA',
-          },
-          {
-            label: 'Overdue',
-            value: overdueTasks,
-            icon: AlertCircle,
-            color: '#F87171',
-          },
-        ].map((item) => {
+        {statistics.map(item => {
 
           const Icon = item.icon;
 
           return (
-
             <div
               key={item.label}
               className="stat-card"
             >
-
               <div className="
-                flex items-center
-                justify-between gap-3
+                flex items-center justify-between gap-3
               ">
-
                 <span className="stat-label">
                   {item.label}
                 </span>
@@ -728,9 +576,8 @@ export default function JobsProject() {
                   className="stat-icon"
                   style={{ color: item.color }}
                 >
-                  <Icon size={20} />
+                  <Icon size={21} />
                 </div>
-
               </div>
 
               <div
@@ -739,48 +586,43 @@ export default function JobsProject() {
               >
                 {item.value}
               </div>
-
             </div>
-
           );
-
         })}
 
       </section>
 
-
-      {/* CREATE & EDIT TASK FORM */}
+      {/* CREATE AND EDIT FORM */}
 
       {draft && (
 
-        <section className="
-          workspace-panel
-          motion-safe:animate-fade-up
-        ">
+        <section
+          ref={formRef}
+          className="
+            workspace-panel
+            motion-safe:animate-fade-up
+          "
+        >
 
           <div className="panel-header">
 
             <div>
-
               <h3 className="section-title">
-
                 {editingId
                   ? 'Edit Task'
                   : 'Create New Task'}
-
               </h3>
 
               <p className="section-description">
                 Lengkapi informasi pekerjaan.
               </p>
-
             </div>
 
             <button
               type="button"
               className="btn-icon"
+              aria-label="Close form"
               onClick={closeForm}
-              aria-label="Close task form"
             >
               <X size={18} />
             </button>
@@ -790,16 +632,10 @@ export default function JobsProject() {
           <form onSubmit={handleSave}>
 
             <div className="
-              grid grid-cols-1
-              gap-5 md:grid-cols-2
+              grid grid-cols-1 gap-5 md:grid-cols-2
             ">
 
-              {/* TASK NAME */}
-
-              <label className="
-                form-group md:col-span-2
-              ">
-
+              <label className="form-group md:col-span-2">
                 <span className="form-label">
                   Task Name
                 </span>
@@ -808,22 +644,17 @@ export default function JobsProject() {
                   className="workspace-input"
                   placeholder="Masukkan nama pekerjaan..."
                   value={draft.title}
-                  onChange={(event) =>
+                  maxLength={200}
+                  required
+                  onChange={event =>
                     updateDraft({
                       title: event.target.value,
                     })
                   }
-                  maxLength={200}
-                  required
                 />
-
               </label>
 
-
-              {/* PROJECT */}
-
               <label className="form-group">
-
                 <span className="form-label">
                   Project / Division
                 </span>
@@ -831,34 +662,25 @@ export default function JobsProject() {
                 <select
                   className="workspace-select"
                   value={draft.projectId}
-                  onChange={(event) =>
+                  required
+                  onChange={event =>
                     updateDraft({
                       projectId: event.target.value,
                     })
                   }
-                  required
                 >
-
-                  {DEMO_PROJECTS.map((project) => (
-
+                  {DEMO_PROJECTS.map(project => (
                     <option
                       key={project.id}
                       value={project.id}
                     >
                       {project.name}
                     </option>
-
                   ))}
-
                 </select>
-
               </label>
 
-
-              {/* PIC */}
-
               <label className="form-group">
-
                 <span className="form-label">
                   Person in Charge (PIC)
                 </span>
@@ -866,34 +688,25 @@ export default function JobsProject() {
                 <select
                   className="workspace-select"
                   value={draft.picId}
-                  onChange={(event) =>
+                  required
+                  onChange={event =>
                     updateDraft({
                       picId: event.target.value,
                     })
                   }
-                  required
                 >
-
-                  {TEAM_MEMBERS.map((member) => (
-
+                  {TEAM_MEMBERS.map(member => (
                     <option
                       key={member.id}
                       value={member.id}
                     >
                       {member.name} — {member.division}
                     </option>
-
                   ))}
-
                 </select>
-
               </label>
 
-
-              {/* DEADLINE */}
-
               <label className="form-group">
-
                 <span className="form-label">
                   Deadline (WIB)
                 </span>
@@ -902,21 +715,16 @@ export default function JobsProject() {
                   type="date"
                   className="workspace-input"
                   value={draft.deadline}
-                  onChange={(event) =>
+                  required
+                  onChange={event =>
                     updateDraft({
                       deadline: event.target.value,
                     })
                   }
-                  required
                 />
-
               </label>
 
-
-              {/* PRIORITY */}
-
               <label className="form-group">
-
                 <span className="form-label">
                   Priority Level
                 </span>
@@ -924,34 +732,25 @@ export default function JobsProject() {
                 <select
                   className="workspace-select"
                   value={draft.priority}
-                  onChange={(event) =>
+                  onChange={event =>
                     updateDraft({
                       priority:
                         event.target.value as TaskPriority,
                     })
                   }
                 >
-
-                  {PRIORITIES.map((priority) => (
-
+                  {PRIORITIES.map(priority => (
                     <option
                       key={priority}
                       value={priority}
                     >
                       {priority}
                     </option>
-
                   ))}
-
                 </select>
-
               </label>
 
-
-              {/* STATUS */}
-
               <label className="form-group">
-
                 <span className="form-label">
                   Task Status
                 </span>
@@ -959,39 +758,30 @@ export default function JobsProject() {
                 <select
                   className="workspace-select"
                   value={draft.status}
-                  onChange={(event) =>
+                  onChange={event =>
                     updateDraft({
                       status:
                         event.target.value as TaskStatus,
                     })
                   }
                 >
-
-                  {TASK_STATUSES.map((status) => (
-
+                  {STATUSES.map(status => (
                     <option
                       key={status}
                       value={status}
                     >
                       {status}
                     </option>
-
                   ))}
-
                 </select>
 
                 <span className="form-description">
-                  Overdue ditentukan otomatis berdasarkan
-                  deadline dan status pekerjaan.
+                  Overdue dihitung otomatis
+                  berdasarkan deadline.
                 </span>
-
               </label>
 
-
-              {/* PROGRESS */}
-
               <label className="form-group">
-
                 <span className="form-label">
                   Task Progress — {draft.progress}%
                 </span>
@@ -1002,31 +792,23 @@ export default function JobsProject() {
                   max={100}
                   step={1}
                   value={draft.progress}
+                  className="w-full accent-journey-300"
                   disabled={
                     draft.status === 'Pending' ||
                     draft.status === 'Completed' ||
                     draft.status === 'Cancelled'
                   }
-                  onChange={(event) =>
+                  onChange={event =>
                     updateDraft({
                       progress: Number(event.target.value),
                     })
                   }
-                  className="
-                    w-full cursor-pointer
-                    accent-journey-300
-                    disabled:cursor-not-allowed
-                  "
                 />
 
                 <ProgressBar value={draft.progress} />
-
               </label>
 
             </div>
-
-
-            {/* FORM BUTTONS */}
 
             <div className="modal-footer">
 
@@ -1042,13 +824,11 @@ export default function JobsProject() {
                 type="submit"
                 className="btn-primary"
               >
-
                 <Save size={17} />
 
                 {editingId
                   ? 'Save Changes'
                   : 'Create Task'}
-
               </button>
 
             </div>
@@ -1059,51 +839,37 @@ export default function JobsProject() {
 
       )}
 
-
       {/* PROJECT OVERVIEW */}
 
       <section className="workspace-card">
 
         <div className="panel-header">
-
           <div>
 
-            <div className="
-              flex items-center gap-2
+            <h3 className="
+              section-title flex items-center gap-2
             ">
-
-              <Layers3
-                size={20}
-                className="text-workspace-silver"
-              />
-
-              <h3 className="section-title">
-                Project Overview
-              </h3>
-
-            </div>
+              <Layers3 size={20} />
+              Project Overview
+            </h3>
 
             <p className="section-description mt-1">
-              Monitoring proyek seluruh divisi.
+              Monitoring progres setiap divisi.
             </p>
 
           </div>
 
-          <span className="
-            text-xs text-workspace-muted
-          ">
+          <span className="text-xs text-workspace-muted">
             {DEMO_PROJECTS.length} Projects
           </span>
-
         </div>
 
         <div className="
           grid grid-cols-1 gap-4
-          md:grid-cols-2
-          2xl:grid-cols-3
+          md:grid-cols-2 2xl:grid-cols-3
         ">
 
-          {DEMO_PROJECTS.map((project) => {
+          {DEMO_PROJECTS.map(project => {
 
             const progress = getProjectProgress(
               project.id,
@@ -1111,13 +877,11 @@ export default function JobsProject() {
             );
 
             const projectTasks = validTasks.filter(
-              (task) =>
-                task.projectId === project.id
+              task => task.projectId === project.id
             );
 
             const completed = projectTasks.filter(
-              (task) =>
-                task.status === 'Completed'
+              task => task.status === 'Completed'
             ).length;
 
             const selected =
@@ -1127,48 +891,39 @@ export default function JobsProject() {
 
               <div
                 key={project.id}
-                className={`
-                  project-card
-                  ${selected
-                    ? '!border-metallic-silver'
-                    : ''}
-                `}
+                className={
+                  `project-card ${
+                    selected
+                      ? '!border-metallic-silver'
+                      : ''
+                  }`
+                }
               >
 
                 <div className="
                   mb-4 flex items-start gap-3
                 ">
-
                   <div className="stat-icon">
                     <Layers3 size={19} />
                   </div>
 
-                  <div className="min-w-0">
-
-                    <p className="
-                      text-sm font-semibold
-                      text-workspace-text
-                    ">
+                  <div>
+                    <p className="font-semibold">
                       {project.name}
                     </p>
 
                     <p className="
-                      mt-1 text-xs
-                      text-workspace-muted
+                      mt-1 text-xs text-workspace-muted
                     ">
                       PIC: {
-                        getMember(project.picId)?.name ??
-                        '-'
+                        getMember(project.picId)?.name ?? '-'
                       }
                     </p>
-
                   </div>
-
                 </div>
 
                 <p className="
-                  mb-4 text-xs
-                  text-workspace-muted
+                  mb-4 text-xs text-workspace-muted
                 ">
                   {project.description}
                 </p>
@@ -1176,9 +931,8 @@ export default function JobsProject() {
                 <ProgressBar value={progress} />
 
                 <div className="
-                  mt-4 flex flex-wrap
-                  items-center justify-between
-                  gap-2 border-t
+                  mt-4 flex flex-wrap items-center
+                  justify-between gap-2 border-t
                   border-workspace-border pt-3
                 ">
 
@@ -1195,17 +949,14 @@ export default function JobsProject() {
                     onClick={() => {
 
                       setProjectFilter(
-                        selected
-                          ? 'all'
-                          : project.id
+                        selected ? 'all' : project.id
                       );
 
                       document
-                        .getElementById('task-list')
+                        .getElementById('task-management')
                         ?.scrollIntoView({
                           behavior: 'auto',
                         });
-
                     }}
                   >
                     {selected
@@ -1216,42 +967,34 @@ export default function JobsProject() {
                 </div>
 
               </div>
-
             );
-
           })}
 
         </div>
 
       </section>
 
-
-      {/* SEARCH & FILTER */}
+      {/* TASK MANAGEMENT AND FILTERS */}
 
       <section
-        id="task-list"
+        id="task-management"
         className="workspace-card"
       >
 
         <div className="panel-header">
 
           <div>
-
             <h3 className="section-title">
               Task Management
             </h3>
 
             <p className="section-description">
-              Pengelolaan seluruh pekerjaan management.
+              Search, filter and organize all tasks.
             </p>
-
           </div>
 
-          {/* VIEW SWITCHER */}
-
           <div className="
-            flex items-center gap-1
-            rounded-xl border
+            flex gap-1 rounded-xl border
             border-workspace-border
             bg-workspace-background p-1
           ">
@@ -1260,14 +1003,13 @@ export default function JobsProject() {
               type="button"
               aria-pressed={view === 'list'}
               onClick={() => setView('list')}
-              className={`
-                flex items-center gap-2
-                rounded-lg px-3 py-2
-                text-xs transition-colors
-                ${view === 'list'
-                  ? 'bg-workspace-elevated text-white'
-                  : 'text-workspace-muted'}
-              `}
+              className={
+                `btn-ghost ${
+                  view === 'list'
+                    ? '!bg-workspace-elevated !text-white'
+                    : ''
+                }`
+              }
             >
               <LayoutList size={16} />
               List
@@ -1277,14 +1019,13 @@ export default function JobsProject() {
               type="button"
               aria-pressed={view === 'kanban'}
               onClick={() => setView('kanban')}
-              className={`
-                flex items-center gap-2
-                rounded-lg px-3 py-2
-                text-xs transition-colors
-                ${view === 'kanban'
-                  ? 'bg-workspace-elevated text-white'
-                  : 'text-workspace-muted'}
-              `}
+              className={
+                `btn-ghost ${
+                  view === 'kanban'
+                    ? '!bg-workspace-elevated !text-white'
+                    : ''
+                }`
+              }
             >
               <Kanban size={16} />
               Kanban
@@ -1293,9 +1034,6 @@ export default function JobsProject() {
           </div>
 
         </div>
-
-
-        {/* SEARCH FIELD */}
 
         <div className="search-wrapper mb-4">
 
@@ -1306,18 +1044,15 @@ export default function JobsProject() {
 
           <input
             className="workspace-input"
-            placeholder="Search tasks, project, or PIC..."
             aria-label="Search tasks"
+            placeholder="Search tasks, project or PIC..."
             value={search}
-            onChange={(event) =>
+            onChange={event =>
               setSearch(event.target.value)
             }
           />
 
         </div>
-
-
-        {/* FILTER CONTROLS */}
 
         <div className="
           grid grid-cols-1 gap-3
@@ -1326,109 +1061,76 @@ export default function JobsProject() {
 
           <select
             className="workspace-select"
-            aria-label="Filter by PIC"
+            aria-label="Filter PIC"
             value={picFilter}
-            onChange={(event) =>
+            onChange={event =>
               setPicFilter(event.target.value)
             }
           >
+            <option value="all">All PIC</option>
 
-            <option value="all">
-              All PIC
-            </option>
-
-            {TEAM_MEMBERS.map((member) => (
-
+            {TEAM_MEMBERS.map(member => (
               <option
                 key={member.id}
                 value={member.id}
               >
                 {member.name}
               </option>
-
             ))}
-
           </select>
-
 
           <select
             className="workspace-select"
-            aria-label="Filter by project"
+            aria-label="Filter project"
             value={projectFilter}
-            onChange={(event) =>
+            onChange={event =>
               setProjectFilter(event.target.value)
             }
           >
+            <option value="all">All Projects</option>
 
-            <option value="all">
-              All Projects
-            </option>
-
-            {DEMO_PROJECTS.map((project) => (
-
+            {DEMO_PROJECTS.map(project => (
               <option
                 key={project.id}
                 value={project.id}
               >
                 {project.name}
               </option>
-
             ))}
-
           </select>
-
 
           <select
             className="workspace-select"
-            aria-label="Filter by status"
+            aria-label="Filter status"
             value={statusFilter}
-            onChange={(event) =>
+            onChange={event =>
               setStatusFilter(event.target.value)
             }
           >
+            <option value="all">All Status</option>
 
-            <option value="all">
-              All Status
-            </option>
-
-            {DISPLAY_STATUSES.map((status) => (
-
-              <option
-                key={status}
-                value={status}
-              >
+            {DISPLAY_STATUSES.map(status => (
+              <option key={status} value={status}>
                 {status}
               </option>
-
             ))}
-
           </select>
-
 
           <select
             className="workspace-select"
-            aria-label="Filter by priority"
+            aria-label="Filter priority"
             value={priorityFilter}
-            onChange={(event) =>
+            onChange={event =>
               setPriorityFilter(event.target.value)
             }
           >
+            <option value="all">All Priorities</option>
 
-            <option value="all">
-              All Priorities
-            </option>
-
-            {PRIORITIES.map((priority) => (
-
-              <option
-                key={priority}
-                value={priority}
-              >
+            {PRIORITIES.map(priority => (
+              <option key={priority} value={priority}>
                 {priority}
               </option>
-
             ))}
-
           </select>
 
         </div>
@@ -1437,7 +1139,6 @@ export default function JobsProject() {
           mt-4 flex items-center
           justify-between gap-3
         ">
-
           <span className="
             text-xs text-workspace-muted
           ">
@@ -1453,11 +1154,9 @@ export default function JobsProject() {
             <RotateCcw size={14} />
             Reset Filters
           </button>
-
         </div>
 
       </section>
-
 
       {/* EMPTY STATE */}
 
@@ -1476,15 +1175,14 @@ export default function JobsProject() {
             </h3>
 
             <p className="empty-state-description">
-              Tidak ada pekerjaan yang sesuai.
-              Buat tugas baru atau ubah filter.
+              Buat pekerjaan baru atau ubah filter.
             </p>
 
             <button
               type="button"
               className="btn-primary mt-5"
               onClick={openCreateTask}
-              disabled={draft !== null}
+              disabled={formOpen}
             >
               <Plus size={17} />
               Create Task
@@ -1496,19 +1194,14 @@ export default function JobsProject() {
 
       ) : view === 'list' ? (
 
-
-        /* ==========================================
-           LIST VIEW
-           ========================================== */
+        /* LIST VIEW */
 
         <section className="table-container">
 
           <table className="management-table">
 
             <thead>
-
               <tr>
-
                 <th>Task Name</th>
                 <th>Project</th>
                 <th>PIC</th>
@@ -1517,20 +1210,17 @@ export default function JobsProject() {
                 <th>Status</th>
                 <th>Progress</th>
                 <th>Actions</th>
-
               </tr>
-
             </thead>
 
             <tbody>
 
-              {filteredTasks.map((task) => {
+              {filteredTasks.map(task => {
 
                 const member = getMember(task.picId);
 
                 const project = DEMO_PROJECTS.find(
-                  (item) =>
-                    item.id === task.projectId
+                  item => item.id === task.projectId
                 );
 
                 return (
@@ -1539,17 +1229,13 @@ export default function JobsProject() {
 
                     <td className="min-w-[200px]">
 
-                      <p className="
-                        font-semibold
-                        text-workspace-text
-                      ">
+                      <p className="font-semibold">
                         {task.title}
                       </p>
 
                       <p
                         className="
-                          mt-1 text-2xs
-                          text-workspace-muted
+                          mt-1 text-2xs text-workspace-muted
                         "
                         title={task.id}
                       >
@@ -1558,31 +1244,22 @@ export default function JobsProject() {
 
                     </td>
 
-                    <td>
-                      {project?.name ?? '-'}
-                    </td>
+                    <td>{project?.name ?? '-'}</td>
 
                     <td>
-
                       <div className="
                         flex items-center gap-2
                         whitespace-nowrap
                       ">
-
-                        <div className="
-                          avatar avatar-sm
-                        ">
+                        <div className="avatar avatar-sm">
                           {member?.initials ?? '?'}
                         </div>
 
                         {member?.name ?? 'Unassigned'}
-
                       </div>
-
                     </td>
 
                     <td className="whitespace-nowrap">
-
                       <span className={
                         isOverdue(task)
                           ? 'text-status-overdue'
@@ -1590,15 +1267,12 @@ export default function JobsProject() {
                       }>
                         {formatDate(task.deadline)}
                       </span>
-
                     </td>
 
                     <td>
-
                       <PriorityBadge
                         priority={task.priority}
                       />
-
                     </td>
 
                     <td>
@@ -1606,39 +1280,25 @@ export default function JobsProject() {
                     </td>
 
                     <td>
-
                       <div className="min-w-[110px]">
-
                         <ProgressBar
                           value={task.progress}
                         />
-
                       </div>
-
                     </td>
 
                     <td>
-
-                      <div className="
-                        flex items-center gap-2
-                      ">
+                      <div className="flex gap-2">
 
                         <button
                           type="button"
                           className="btn-icon"
                           title="Edit Task"
                           aria-label={`Edit ${task.title}`}
-                          disabled={draft !== null}
-                          onClick={() => {
-
-                            openEditTask(task);
-
-                            window.scrollTo({
-                              top: 0,
-                              behavior: 'auto',
-                            });
-
-                          }}
+                          disabled={formOpen}
+                          onClick={() =>
+                            openEditTask(task)
+                          }
                         >
                           <Pencil size={15} />
                         </button>
@@ -1651,6 +1311,7 @@ export default function JobsProject() {
                           "
                           title="Delete Task"
                           aria-label={`Delete ${task.title}`}
+                          disabled={formOpen}
                           onClick={() =>
                             handleDelete(task)
                           }
@@ -1659,228 +1320,182 @@ export default function JobsProject() {
                         </button>
 
                       </div>
-
                     </td>
 
                   </tr>
-
                 );
-
               })}
 
             </tbody>
-
           </table>
 
         </section>
 
       ) : (
 
-
-        /* ==========================================
-           KANBAN VIEW
-           ========================================== */
+        /* KANBAN VIEW */
 
         <section className="
-          grid grid-cols-1
-          gap-4 md:grid-cols-2
-          2xl:grid-cols-3
+          grid grid-cols-1 gap-4
+          md:grid-cols-2 2xl:grid-cols-3
         ">
 
-          {DISPLAY_STATUSES.map((status) => {
+          {DISPLAY_STATUSES
+            .filter(status =>
+              statusFilter === 'all' ||
+              statusFilter === status
+            )
+            .map(status => {
 
-            const columnTasks = filteredTasks.filter(
-              (task) =>
-                getDisplayStatus(task) === status
-            );
+              const columnTasks = filteredTasks.filter(
+                task => getDisplayStatus(task) === status
+              );
 
-            if (
-              statusFilter !== 'all' &&
-              statusFilter !== status
-            ) {
-              return null;
-            }
+              return (
 
-            return (
+                <div
+                  key={status}
+                  className="
+                    min-w-0 rounded-panel border
+                    border-workspace-border
+                    bg-workspace-surface p-4
+                  "
+                >
 
-              <div
-                key={status}
-                className="
-                  min-w-0 rounded-panel
-                  border border-workspace-border
-                  bg-workspace-surface p-4
-                "
-              >
-
-                <div className="
-                  mb-4 flex items-center
-                  justify-between gap-2
-                ">
-
-                  <span className={`
-                    status-badge
-                    ${getStatusClass(status)}
-                  `}>
-                    {status}
-                  </span>
-
-                  <span className="
-                    rounded-lg
-                    bg-workspace-elevated
-                    px-2 py-1 text-xs
-                    text-workspace-muted
+                  <div className="
+                    mb-4 flex items-center
+                    justify-between
                   ">
-                    {columnTasks.length}
-                  </span>
 
-                </div>
+                    <span className={
+                      `status-badge ${
+                        getStatusClass(status)
+                      }`
+                    }>
+                      {status}
+                    </span>
 
-                <div className="space-y-3">
-
-                  {columnTasks.length === 0 && (
-
-                    <div className="
-                      rounded-xl border
-                      border-dashed
-                      border-workspace-border
-                      p-6 text-center text-xs
-                      text-workspace-muted
+                    <span className="
+                      text-xs text-workspace-muted
                     ">
-                      No tasks
-                    </div>
+                      {columnTasks.length}
+                    </span>
 
-                  )}
+                  </div>
 
-                  {columnTasks.map((task) => (
+                  <div className="space-y-3">
 
-                    <div
-                      key={task.id}
-                      className="
-                        rounded-xl border
-                        border-workspace-border
-                        bg-workspace-background p-4
-                      "
-                    >
-
-                      <div className="
-                        mb-3 flex flex-wrap
-                        items-center gap-2
+                    {columnTasks.length === 0 && (
+                      <p className="
+                        rounded-xl border border-dashed
+                        border-workspace-border p-6
+                        text-center text-xs
+                        text-workspace-muted
                       ">
+                        No tasks
+                      </p>
+                    )}
+
+                    {columnTasks.map(task => (
+
+                      <div
+                        key={task.id}
+                        className="
+                          rounded-xl border
+                          border-workspace-border
+                          bg-workspace-background p-4
+                        "
+                      >
 
                         <PriorityBadge
                           priority={task.priority}
                         />
 
-                      </div>
+                        <h4 className="
+                          my-3 break-words
+                          text-sm font-semibold
+                        ">
+                          {task.title}
+                        </h4>
 
-                      <h4 className="
-                        mb-2 break-words
-                        text-sm font-semibold
-                      ">
-                        {task.title}
-                      </h4>
-
-                      <p className="
-                        mb-4 text-xs
-                        text-workspace-muted
-                      ">
-                        {
-                          DEMO_PROJECTS.find(
-                            (project) =>
-                              project.id ===
-                              task.projectId
-                          )?.name ?? '-'
-                        }
-                      </p>
-
-                      <div className="
-                        mb-2 flex items-center
-                        gap-2 text-xs
-                        text-workspace-muted
-                      ">
-
-                        <Users size={14} />
-
-                        {getMember(task.picId)?.name ?? '-'}
-
-                      </div>
-
-                      <div className="
-                        mb-4 flex items-center
-                        gap-2 text-xs
-                        text-workspace-muted
-                      ">
-
-                        <CalendarDays size={14} />
-
-                        {formatDate(task.deadline)}
-
-                      </div>
-
-                      <ProgressBar
-                        value={task.progress}
-                      />
-
-                      <div className="
-                        mt-4 flex items-center
-                        justify-end gap-2
-                        border-t
-                        border-workspace-border pt-3
-                      ">
-
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          disabled={draft !== null}
-                          onClick={() => {
-
-                            openEditTask(task);
-
-                            window.scrollTo({
-                              top: 0,
-                              behavior: 'auto',
-                            });
-
-                          }}
-                        >
-                          <Pencil size={14} />
-                          Edit
-                        </button>
-
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          aria-label={`Delete ${task.title}`}
-                          onClick={() =>
-                            handleDelete(task)
+                        <p className="
+                          mb-3 text-xs text-workspace-muted
+                        ">
+                          {
+                            DEMO_PROJECTS.find(
+                              project =>
+                                project.id === task.projectId
+                            )?.name ?? '-'
                           }
-                        >
-                          <Trash2
-                            size={14}
-                            className="text-status-overdue"
-                          />
-                        </button>
+                        </p>
+
+                        <div className="
+                          mb-2 flex items-center gap-2
+                          text-xs text-workspace-muted
+                        ">
+                          <Users size={14} />
+                          {getMember(task.picId)?.name ?? '-'}
+                        </div>
+
+                        <div className="
+                          mb-4 flex items-center gap-2
+                          text-xs text-workspace-muted
+                        ">
+                          <CalendarDays size={14} />
+                          {formatDate(task.deadline)}
+                        </div>
+
+                        <ProgressBar value={task.progress} />
+
+                        <div className="
+                          mt-4 flex justify-end gap-2
+                          border-t
+                          border-workspace-border pt-3
+                        ">
+
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={formOpen}
+                            onClick={() =>
+                              openEditTask(task)
+                            }
+                          >
+                            <Pencil size={14} />
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            aria-label={`Delete ${task.title}`}
+                            disabled={formOpen}
+                            onClick={() =>
+                              handleDelete(task)
+                            }
+                          >
+                            <Trash2
+                              size={14}
+                              className="text-status-overdue"
+                            />
+                          </button>
+
+                        </div>
 
                       </div>
+                    ))}
 
-                    </div>
-
-                  ))}
+                  </div>
 
                 </div>
-
-              </div>
-
-            );
-
-          })}
+              );
+            })}
 
         </section>
 
       )}
 
-
-      {/* DEMONSTRATION MODE FOOTER */}
+      {/* DEMO MODE FOOTER */}
 
       <section className="
         rounded-card border
@@ -1889,25 +1504,20 @@ export default function JobsProject() {
       ">
 
         <div className="
-          flex flex-col gap-3
-          sm:flex-row sm:items-center
-          sm:justify-between
+          flex flex-col gap-3 sm:flex-row
+          sm:items-center sm:justify-between
         ">
 
           <div>
 
-            <p className="
-              text-sm font-semibold
-              text-workspace-silver
-            ">
+            <p className="text-sm font-semibold">
               Local Demonstration Mode
             </p>
 
             <p className="
-              mt-1 text-xs
-              text-workspace-muted
+              mt-1 text-xs text-workspace-muted
             ">
-              Data disimpan pada browser ini.
+              Data tersimpan pada browser ini.
               Gunakan data simulasi sampai database
               dan autentikasi tersedia.
             </p>
@@ -1917,7 +1527,7 @@ export default function JobsProject() {
           <button
             type="button"
             className="btn-secondary"
-            onClick={handleResetDemo}
+            onClick={handleReset}
           >
             <RotateCcw size={15} />
             Reset Demo Data
