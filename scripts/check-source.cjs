@@ -1,0 +1,6 @@
+// Offline syntax and local-import check. Requires TypeScript installed locally or NODE_PATH.
+const fs=require('node:fs'),path=require('node:path'),ts=require('typescript');
+const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(d,e.name)):[path.join(d,e.name)]);
+const files=[...walk('src'),...walk('tests'),'vite.config.ts'].filter(f=>/\.tsx?$/.test(f));let errors=0;
+for(const f of files){const source=fs.readFileSync(f,'utf8');const sf=ts.createSourceFile(f,source,ts.ScriptTarget.Latest,true);const diagnostics=sf.parseDiagnostics??[];if(!f.endsWith('.d.ts'))diagnostics.push(...(ts.transpileModule(source,{fileName:f,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.ReactJSX,isolatedModules:true},reportDiagnostics:true}).diagnostics??[]));for(const d of diagnostics){console.error(f,ts.flattenDiagnosticMessageText(d.messageText,' '));errors++;}for(const spec of ts.preProcessFile(source,true,true).importedFiles){const p=spec.fileName;if(p.startsWith('.')){const full=path.resolve(path.dirname(f),p);if(![full,full+'.ts',full+'.tsx',full+'.css',path.join(full,'index.ts')].some(x=>fs.existsSync(x))){console.error(f,'missing local import',p);errors++;}}}}
+console.log(`${files.length} TypeScript files checked; ${errors} syntax/local import errors.`);process.exitCode=errors?1:0;
