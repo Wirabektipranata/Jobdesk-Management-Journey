@@ -43,6 +43,12 @@ export default function PasswordRecovery({initialEmail, onBack}: {initialEmail: 
     if (!/^\d{6,10}$/.test(code.trim())) {setError('Masukkan kode numerik sesuai email pemulihan.'); return;}
     if (password.length < 12 || new TextEncoder().encode(password).length > 72) {setError('Gunakan minimal 12 karakter dan maksimal 72 byte.'); return;}
     if (password !== confirmation) {setError('Konfirmasi password tidak sama.'); return;}
+    const recoveryUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? '';
+    const recoveryKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ?? '';
+    if (!recoveryUrl || !recoveryKey) {
+      setError('Konfigurasi Supabase belum tersedia. Hubungi administrator.');
+      return;
+    }
     setBusy(true);
     // Isolated, in-memory session: recovery must not sign the main workspace in.
     let client: ReturnType<typeof createClient> | undefined;
@@ -50,7 +56,7 @@ export default function PasswordRecovery({initialEmail, onBack}: {initialEmail: 
     let changed = false;
     let revoked = false;
     try {
-      client = createClient(import.meta.env.VITE_SUPABASE_URL.trim(), import.meta.env.VITE_SUPABASE_ANON_KEY.trim(), {
+      client = createClient(recoveryUrl, recoveryKey, {
         auth: {persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'journeyfx-recovery-ephemeral'}
       });
       const result = await client.auth.verifyOtp({email: email.trim(), token: code.trim(), type: 'recovery'});
